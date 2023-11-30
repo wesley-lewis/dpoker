@@ -1,4 +1,4 @@
-package server
+package p2p 
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ type Peer struct {
 }
 
 type ServerConfig struct {
-	listenAddr string
+	ListenAddr string
 }
 
 type Server struct {
@@ -36,8 +36,9 @@ func (s *Server) Start() {
 	if err := s.listen(); err != nil {
 		panic(err)
 	}
-
-	go s.acceptLoop()
+	
+	fmt.Printf("starting the server\n")
+	s.acceptLoop()
 }
 
 func (s *Server) acceptLoop() {
@@ -57,18 +58,18 @@ func (s *Server) handleConn(conn net.Conn) {
 		if err != nil {
 			break
 		}
-		fmt.Println(string(buf[:n]))
+		fmt.Printf("%s", string(buf[:n]))
 	}
 }
 
 func(s* Server) listen() error {
-	lis, err := net.Listen("tcp",s.ServerConfig.listenAddr)
+	lis, err := net.Listen("tcp",s.ServerConfig.ListenAddr)
 	if err != nil {
 		return err
 	}
 
 	s.listener = lis
-
+	fmt.Println("Server listening on port:", s.ServerConfig.ListenAddr)
 	return nil
 }
 
@@ -81,3 +82,5 @@ func (s *Server) loop() {
 		}
 	}
 }
+
+// 54:59
