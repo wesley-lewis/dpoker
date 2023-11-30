@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"net"
-	"net/http"
 	"sync"
 )
 
@@ -38,16 +37,28 @@ func (s *Server) Start() {
 		panic(err)
 	}
 
-	conn, err := s.listener.Accept()
-	if err != nil {
-		panic(err)
-	}
+	go s.acceptLoop()
+}
 
-	go s.handleConn(conn)
+func (s *Server) acceptLoop() {
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+		go s.handleConn(conn)
+	}
 }
 
 func (s *Server) handleConn(conn net.Conn) {
-
+	buf := make([]byte, 1024)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			break
+		}
+		fmt.Println(string(buf[:n]))
+	}
 }
 
 func(s* Server) listen() error {
