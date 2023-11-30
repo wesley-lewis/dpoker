@@ -3,6 +3,7 @@ package p2p
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"io"
 	"net"
 	"sync"
@@ -20,6 +21,7 @@ func(p *Peer) Send(b []byte) error {
 
 type ServerConfig struct {
 	ListenAddr			string
+	Version					string
 }
 
 type Message struct {
@@ -35,6 +37,7 @@ type Server struct {
 	mu							sync.RWMutex
 	peers						map[net.Addr]*Peer
 	addPeer					chan *Peer
+	delPeer					chan *Peer
 	msgCh						chan *Message 
 }
 
@@ -44,6 +47,7 @@ func NewServer(cfg ServerConfig) *Server {
 		handler: NewDefaultHandler(),
 		peers: make(map[net.Addr]*Peer),
 		addPeer: make(chan *Peer),
+		delPeer: make(chan *Peer),
 		msgCh: make(chan *Message),
 	}
 }
@@ -58,6 +62,21 @@ func (s *Server) Start() {
 	s.acceptLoop()
 }
 
+// TODO: redundant code to add new peers
+func (s *Server) Connect(addr string) error {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	peer := &Peer {
+		conn: conn,
+	}
+
+	s.addPeer <- peer
+
+	return peer.Send([]byte(s.ServerConfig.Version))
+}
+
 func (s *Server) acceptLoop() {
 	for {
 		conn, err := s.listener.Accept()
@@ -65,33 +84,36 @@ func (s *Server) acceptLoop() {
 			panic(err)
 		}
 
-		peer := Peer {
+		peer := &Peer {
 			conn: conn, 
 		}
 
-		s.addPeer <- &peer
+		s.addPeer <- peer
 
-		peer.Send([]byte("DPOKER V0.1-alpha"))
+		peer.Send([]byte(s.ServerConfig.Version + "\n"))
 
-		go s.handleConn(conn)
+		go s.handleConn(peer)
 	}
 }
 
-func (s *Server) handleConn(conn net.Conn) {
+func (s *Server) handleConn(peer *Peer) {
 	buf := make([]byte, 1024)
+
 	for {
-		n, err := conn.Read(buf)
+		n, err := peer.conn.Read(buf)
 		if err != nil {
 			break
 		}
 
 		s.msgCh <- &Message{
-			From:			conn.RemoteAddr(),
+			From:			peer.conn.RemoteAddr(),
 			Payload:	bytes.NewReader(buf[:n]),
 		}
 		
 		fmt.Printf("%s", string(buf[:n]))
 	}
+
+	s.delPeer <- peer
 }
 
 func(s* Server) listen() error {
@@ -108,6 +130,11 @@ func(s* Server) listen() error {
 func (s *Server) loop() {
 	for {
 		select {
+		case peer := <- s.delPeer:
+			addr := peer.conn.RemoteAddr()
+			delete(s.peers, addr)
+			fmt.Printf("player disconnected %s\n", addr)
+
 		case peer := <- s.addPeer:
 			s.peers[peer.conn.RemoteAddr()] = peer
 			fmt.Printf("new player connected %s\n", peer.conn.RemoteAddr())

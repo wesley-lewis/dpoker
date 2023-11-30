@@ -10,10 +10,13 @@ type Handler interface {
 }
 
 type DefaultHandler struct {
+	Version			string
 }
 
 func NewDefaultHandler() Handler {
-	return &DefaultHandler{}
+	return &DefaultHandler{
+		Version: "v.0.1-alpha",
+	}
 }
 
 func (h *DefaultHandler) HandleMessage(msg *Message) error {
