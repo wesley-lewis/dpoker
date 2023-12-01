@@ -17,7 +17,9 @@ func main() {
 	remoteCfg := p2p.ServerConfig {
 		ListenAddr: ":4000",
 		Version: "DPOKER V0.1-alpha",
+		GameVariant: p2p.TexasHoldem,
 	}
+
 	remoteServer := p2p.NewServer(remoteCfg)
 	go remoteServer.Start()
 
