@@ -1,6 +1,8 @@
 package p2p
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"net"
@@ -15,6 +17,12 @@ const (
 	Other
 )
 
+func init() {
+	gob.Register(GameVariant(0))
+	gob.Register(GameVariant(1))
+	gob.Register(Handshake{})
+}
+
 func (gv GameVariant) String() string {
 	switch gv {
 		case TexasHoldem:
@@ -22,7 +30,7 @@ func (gv GameVariant) String() string {
 		case Other:
 			return "OTHER"
 		default:
-			return "-"
+			return "UNKNOWN"
 	}
 }
 
@@ -36,7 +44,6 @@ type Server struct {
 	ServerConfig		ServerConfig
 
 	transport *TCPTransport
-	handler					Handler
 	listener				net.Listener
 	peers						map[net.Addr]*Peer
 	addPeer					chan *Peer
@@ -47,7 +54,6 @@ type Server struct {
 func NewServer(cfg ServerConfig) *Server {
 	s :=  &Server{
 		ServerConfig: cfg,
-		handler: NewDefaultHandler(),
 		peers: make(map[net.Addr]*Peer),
 		addPeer: make(chan *Peer),
 		delPeer: make(chan *Peer),
@@ -63,6 +69,8 @@ func NewServer(cfg ServerConfig) *Server {
 }
 
 func (s *Server) Start() {
+	gob.Register(GameVariant(0))
+	gob.Register(GameVariant(1))
 	go s.loop()
 
 	fmt.Printf("game server running on port %s\n", s.transport.listenAddr)
@@ -72,6 +80,20 @@ func (s *Server) Start() {
 	}).Info("started new game server")
 
 	s.transport.ListenAndAccept()
+}
+
+func(s *Server) SendHandshake(peer *Peer) error {
+	hs := &Handshake {
+		GameVariant: s.ServerConfig.GameVariant,
+		Version: s.ServerConfig.Version,
+	}
+
+	buf := new(bytes.Buffer)
+	if err := gob.NewEncoder(buf).Encode(&hs); err != nil {
+		return err
+	}
+
+	return peer.Send(buf.Bytes())
 }
 
 // TODO: redundant code to add new peers
@@ -102,19 +124,60 @@ func (s *Server) loop() {
 			delete(s.peers, addr)
 			fmt.Printf("player disconnected %s\n", addr)
 
+			// if a new peer connects to the server we send our handhskake message and wait for his reply.
 		case peer := <- s.addPeer:
+			s.SendHandshake(peer)
+
+			if err := s.handshake(peer); err != nil {
+				logrus.Errorf("handshake with incoming player failed: %s", err.Error())
+				continue
+			}
 			// TODO: check max players and other game state logic
 			go peer.ReadLoop(s.msgCh)
 
 			logrus.WithFields(logrus.Fields {
 				"addr": peer.conn.RemoteAddr(),
-			}).Info("new player connected")
+				}).Info("handshake successful: new player connected")
 			s.peers[peer.conn.RemoteAddr()] = peer
 
 		case msg := <- s.msgCh:
-			if err := s.handler.HandleMessage(msg); err != nil {
+			if err := s.handleMessage(msg); err != nil {
 				panic(err)
 			}
 		}
 	}
 }
+
+type Handshake struct {
+	Version							string
+	GameVariant					GameVariant
+}
+
+func(s *Server) handshake(peer *Peer) error {
+	hs := &Handshake{}
+	if err := gob.NewDecoder(peer.conn).Decode(hs); err != nil {
+		return fmt.Errorf("Can't connect: %s", err)
+	}
+
+	if s.ServerConfig.GameVariant != hs.GameVariant {
+		return fmt.Errorf("Invalid gamevariant %s", hs.GameVariant)
+	}
+
+	if s.ServerConfig.Version != hs.Version {
+		return fmt.Errorf("invalid version %s", hs.Version)
+	}
+
+	fmt.Printf("hs => %+v\n", hs)
+	logrus.WithFields(logrus.Fields{
+		"peer": peer.conn.RemoteAddr(),
+		"version": hs.Version,
+		"variant": hs.GameVariant,
+	}).Info("received handshake")
+	return nil
+}
+
+func(s *Server) handleMessage(msg *Message) error {
+	fmt.Printf("%+v\n", msg)
+	return nil
+}
+
