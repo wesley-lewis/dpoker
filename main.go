@@ -10,7 +10,9 @@ func main() {
 	cfg := p2p.ServerConfig {
 		ListenAddr: ":3000",
 		Version: "DPOKER V0.1-alpha",
+		GameVariant: p2p.TexasHoldem,
 	}
+
 	server := p2p.NewServer(cfg)
 	go server.Start()
 
