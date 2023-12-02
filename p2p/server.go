@@ -2,8 +2,10 @@ package p2p
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 	"fmt"
+	"io"
 	"log"
 	"net"
 
@@ -36,12 +38,12 @@ func (gv GameVariant) String() string {
 
 type ServerConfig struct {
 	ListenAddr			string
-	Version					string
+	Version					string	
 	GameVariant			GameVariant
 }
 
 type Server struct {
-	ServerConfig		ServerConfig
+	ServerConfig
 
 	transport *TCPTransport
 	listener				net.Listener
@@ -49,6 +51,8 @@ type Server struct {
 	addPeer					chan *Peer
 	delPeer					chan *Peer
 	msgCh						chan *Message 
+
+	gameState *GameState
 }
 
 func NewServer(cfg ServerConfig) *Server {
@@ -58,6 +62,7 @@ func NewServer(cfg ServerConfig) *Server {
 		addPeer: make(chan *Peer),
 		delPeer: make(chan *Peer),
 		msgCh: make(chan *Message),
+		gameState: NewGameState(),
 	}
 
 	tr := NewTcpTransport(s.ServerConfig.ListenAddr)
@@ -69,8 +74,6 @@ func NewServer(cfg ServerConfig) *Server {
 }
 
 func (s *Server) Start() {
-	gob.Register(GameVariant(0))
-	gob.Register(GameVariant(1))
 	go s.loop()
 
 	fmt.Printf("game server running on port %s\n", s.transport.listenAddr)
@@ -92,6 +95,9 @@ func(s *Server) SendHandshake(peer *Peer) error {
 	if err := gob.NewEncoder(buf).Encode(&hs); err != nil {
 		return err
 	}
+	// if err := hs.Encode(buf); err != nil {
+	// 	return err
+	// }
 
 	return peer.Send(buf.Bytes())
 }
@@ -153,21 +159,46 @@ type Handshake struct {
 	GameVariant					GameVariant
 }
 
+func(hs *Handshake) Decode(r io.Reader) error {
+	if err := binary.Read(r, binary.LittleEndian, &hs.Version); err != nil {
+		return err
+	}
+	fmt.Println("Decoding:",hs.Version)
+
+	if err := binary.Read(r, binary.LittleEndian, &hs.GameVariant); err != nil {
+		return err
+	}
+	
+	return nil
+}
+
+func(hs *Handshake) Encode(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, []byte(hs.Version)); err != nil {
+		return err
+	}
+	if err :=  binary.Write(w, binary.LittleEndian, uint8(hs.GameVariant)); err != nil {
+		return err
+	}
+	return nil
+}
+
 func(s *Server) handshake(peer *Peer) error {
 	hs := &Handshake{}
 	if err := gob.NewDecoder(peer.conn).Decode(hs); err != nil {
 		return fmt.Errorf("Can't connect: %s", err)
 	}
+	// if err := hs.Decode(peer.conn); err != nil {
+	// 	return err
+	// }
 
 	if s.ServerConfig.GameVariant != hs.GameVariant {
 		return fmt.Errorf("Invalid gamevariant %s", hs.GameVariant)
 	}
 
-	if s.ServerConfig.Version != hs.Version {
+	if string(s.ServerConfig.Version) != string(hs.Version) {
 		return fmt.Errorf("invalid version %s", hs.Version)
 	}
 
-	fmt.Printf("hs => %+v\n", hs)
 	logrus.WithFields(logrus.Fields{
 		"peer": peer.conn.RemoteAddr(),
 		"version": hs.Version,
